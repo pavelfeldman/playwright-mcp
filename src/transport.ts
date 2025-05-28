@@ -28,7 +28,9 @@ import type { Connection } from './connection.js';
 import type { FullConfig } from './config.js';
 
 export async function startStdioTransport(config: FullConfig, connectionList: Connection[]) {
-  const connection = await createConnection(config);
+  const { connection, error } = await createConnection(config);
+  if (!connection)
+    throw new Error(error);
   await connection.connect(new StdioServerTransport());
   connectionList.push(connection);
 }
@@ -51,7 +53,11 @@ async function handleSSE(config: FullConfig, req: http.IncomingMessage, res: htt
   } else if (req.method === 'GET') {
     const transport = new SSEServerTransport('/sse', res);
     sessions.set(transport.sessionId, transport);
-    const connection = await createConnection(config);
+    const { connection, error } = await createConnection(config);
+    if (!connection) {
+      res.statusCode = 503;
+      return res.end(error);
+    }
     await connection.connect(transport);
     connectionList.push(connection);
     res.on('close', () => {
@@ -91,7 +97,11 @@ async function handleStreamable(config: FullConfig, req: http.IncomingMessage, r
       if (transport.sessionId)
         sessions.delete(transport.sessionId);
     };
-    const connection = await createConnection(config);
+    const { connection, error } = await createConnection(config);
+    if (!connection) {
+      res.statusCode = 400;
+      return res.end(error);
+    }
     connectionList.push(connection);
     await Promise.all([
       connection.connect(transport),

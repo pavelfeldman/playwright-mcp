@@ -16,7 +16,7 @@
 
 import url from 'node:url';
 import http from 'node:http';
-import { spawn } from 'node:child_process';
+import { ChildProcess, spawn } from 'node:child_process';
 import path from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
@@ -31,34 +31,44 @@ import { test as baseTest, expect } from './fixtures.js';
 // NOTE: Can be removed when we drop Node.js 18 support and changed to import.meta.filename.
 const __filename = url.fileURLToPath(import.meta.url);
 
-const test = baseTest.extend<{ serverEndpoint: string }>({
+const test = baseTest.extend<{ serverEndpoint: (args?: string[]) => Promise<{ url: URL, stderr: () => string }> }>({
   serverEndpoint: async ({}, use) => {
-    const cp = spawn('node', [path.join(path.dirname(__filename), '../cli.js'), '--port', '0'], { stdio: 'pipe' });
-    try {
+    let cp: ChildProcess | undefined;
+    await use(async (args?: string[]) => {
+      if (cp)
+        throw new Error('Server already running');
+      cp = spawn('node', [
+        path.join(path.dirname(__filename), '../cli.js'), '--port', '0', ...(args ?? [])
+      ], {
+        stdio: 'pipe',
+        env: { ...process.env, DEBUG: 'pw-mcp:test', DEBUG_COLORS: '0' },
+      });
       let stderr = '';
-      const url = await new Promise<string>(resolve => cp.stderr?.on('data', data => {
+      const url = await new Promise<string>(resolve => cp!.stderr?.on('data', data => {
         stderr += data.toString();
         const match = stderr.match(/Listening on (http:\/\/.*)/);
         if (match)
           resolve(match[1]);
       }));
+      return { url: new URL(url), stderr: () => stderr };
+    });
 
-      await use(url);
-    } finally {
-      cp.kill();
-    }
+    if (cp)
+      cp.kill('SIGTERM');
   },
 });
 
 test('sse transport', async ({ serverEndpoint }) => {
-  const transport = new SSEClientTransport(new URL(serverEndpoint));
+  const { url } = await serverEndpoint();
+  const transport = new SSEClientTransport(url);
   const client = new Client({ name: 'test', version: '1.0.0' });
   await client.connect(transport);
   await client.ping();
 });
 
 test('streamable http transport', async ({ serverEndpoint }) => {
-  const transport = new StreamableHTTPClientTransport(new URL('/mcp', serverEndpoint));
+  const { url } = await serverEndpoint();
+  const transport = new StreamableHTTPClientTransport(new URL('/mcp', url));
   const client = new Client({ name: 'test', version: '1.0.0' });
   await client.connect(transport);
   await client.ping();
@@ -106,4 +116,79 @@ test('sse transport via public API', async ({ server }, testInfo) => {
   })).toContainTextContent(`- generic [ref=e1]: Hello, world!`);
   await client.close();
   mcpServer.close();
+});
+
+test('sse transport isolated contexts', async ({ serverEndpoint, server, mcpHeadless }) => {
+  server.setContent('/', `
+    <body>
+    </body>
+    <script>
+      document.body.textContent = localStorage.getItem('test') ? 'Storage: YES' : 'Storage: NO';
+      localStorage.setItem('test', 'test');
+    </script>
+  `, 'text/html');
+
+  const { url, stderr } = await serverEndpoint(['--isolated', ...(mcpHeadless ? ['--headless'] : [])]);
+
+  const transport1 = new SSEClientTransport(url);
+  const client1 = new Client({ name: 'test', version: '1.0.0' });
+  await client1.connect(transport1);
+  const response1 = await client1.callTool({
+    name: 'browser_navigate',
+    arguments: { url: server.PREFIX },
+  });
+  expect(response1).toContainTextContent(`Storage: NO`);
+
+  const transport2 = new SSEClientTransport(url);
+  const client2 = new Client({ name: 'test', version: '1.0.0' });
+  await client2.connect(transport2);
+  const response2 = await client2.callTool({
+    name: 'browser_navigate',
+    arguments: { url: server.PREFIX },
+  });
+  expect(response2).toContainTextContent(`Storage: NO`);
+
+  // Check that it only contains this string once
+  const log = stderr();
+  expect(log.match(/Launching browser/g)?.length).toBe(1);
+  expect(log.match(/Creating isolated context/g)?.length).toBe(2);
+});
+
+test('sse transport non-isolated contexts should fail', async ({ serverEndpoint, server, mcpHeadless }) => {
+  const { url } = await serverEndpoint(mcpHeadless ? ['--headless'] : []);
+
+  const transport1 = new SSEClientTransport(url);
+  const client1 = new Client({ name: 'test', version: '1.0.0' });
+  await client1.connect(transport1);
+  await client1.callTool({
+    name: 'browser_navigate',
+    arguments: { url: server.HELLO_WORLD },
+  });
+
+  const transport2 = new SSEClientTransport(url);
+  const client2 = new Client({ name: 'test', version: '1.0.0' });
+  const error = await client2.connect(transport2).catch(e => e);
+  expect(error.message).toContain('Non-200 status code (503)');
+});
+
+test.only('sse transport non-isolated contexts should work after closing the first connection', async ({ serverEndpoint, server, mcpHeadless }) => {
+  const { url } = await serverEndpoint(mcpHeadless ? ['--headless'] : []);
+
+  const transport1 = new SSEClientTransport(url);
+  const client1 = new Client({ name: 'test', version: '1.0.0' });
+  await client1.connect(transport1);
+  await client1.callTool({
+    name: 'browser_navigate',
+    arguments: { url: server.HELLO_WORLD },
+  });
+
+  await client1.close();
+
+  const transport2 = new SSEClientTransport(url);
+  const client2 = new Client({ name: 'test', version: '1.0.0' });
+  await client2.connect(transport2);
+  await client2.callTool({
+    name: 'browser_navigate',
+    arguments: { url: server.HELLO_WORLD },
+  });
 });

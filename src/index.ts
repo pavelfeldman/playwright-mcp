@@ -21,5 +21,8 @@ import type { Config } from '../config.js';
 
 export async function createConnection(userConfig: Config = {}): Promise<Connection> {
   const config = await resolveConfig(userConfig);
-  return createConnectionImpl(config);
+  const { connection, error } = await createConnectionImpl(config);
+  if (!connection)
+    throw new Error(error);
+  return connection;
 }

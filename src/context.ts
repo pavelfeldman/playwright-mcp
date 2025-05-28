@@ -19,6 +19,7 @@ import url from 'node:url';
 import os from 'node:os';
 import path from 'node:path';
 
+import debug from 'debug';
 import * as playwright from 'playwright';
 
 import { callOnPageNoTrace, waitForCompletion } from './tools/utils.js';
@@ -29,6 +30,8 @@ import { outputFile } from './config.js';
 import type { ImageContent, TextContent } from '@modelcontextprotocol/sdk/types.js';
 import type { ModalState, Tool, ToolActionResult } from './tools/tool.js';
 import type { FullConfig } from './config.js';
+
+const testDebug = debug('pw-mcp:test');
 
 type PendingAction = {
   dialogShown: ManualPromise<void>;
@@ -49,10 +52,12 @@ export class Context {
   private _pendingAction: PendingAction | undefined;
   private _downloads: { download: playwright.Download, finished: boolean, outputFile: string }[] = [];
   clientVersion: { name: string; version: string; } | undefined;
+  private _sharedBrowser: SharedBrowser;
 
-  constructor(tools: Tool[], config: FullConfig) {
+  constructor(tools: Tool[], config: FullConfig, sharedBrowser: SharedBrowser) {
     this.tools = tools;
     this.config = config;
+    this._sharedBrowser = sharedBrowser;
   }
 
   clientSupportsImages(): boolean {
@@ -304,7 +309,8 @@ ${code.join('\n')}
       if (this.config.saveTrace)
         await browserContext.tracing.stop();
       await browserContext.close().then(async () => {
-        await browser?.close();
+        if (!this.config.browser?.isolated)
+          await browser?.close();
       }).catch(() => {});
     });
   }
@@ -368,23 +374,39 @@ ${code.join('\n')}
       return { browser, browserContext };
     }
 
-    return this.config.browser?.isolated ?
-      await createIsolatedContext(this.config.browser) :
-      await launchPersistentContext(this.config.browser);
+    if (this.config.browser?.isolated)
+      return await this._sharedBrowser.createIsolatedContext();
+    return await launchPersistentContext(this.config.browser);
   }
 }
 
-async function createIsolatedContext(browserConfig: FullConfig['browser']): Promise<BrowserContextAndBrowser> {
-  try {
-    const browserName = browserConfig?.browserName ?? 'chromium';
-    const browserType = playwright[browserName];
-    const browser = await browserType.launch(browserConfig.launchOptions);
-    const browserContext = await browser.newContext(browserConfig.contextOptions);
+export class SharedBrowser {
+  private _browserConfig: FullConfig['browser'];
+  private _browserPromise: Promise<playwright.Browser> | undefined;
+
+  constructor(browserConfig: FullConfig['browser']) {
+    this._browserConfig = browserConfig;
+  }
+
+  async browser(): Promise<playwright.Browser> {
+    if (!this._browserPromise) {
+      const browserName = this._browserConfig.browserName ?? 'chromium';
+      const browserType = playwright[browserName];
+      testDebug('Launching browser');
+      this._browserPromise = browserType.launch(this._browserConfig.launchOptions).catch(error => {
+        if (error.message.includes('Executable doesn\'t exist'))
+          throw new Error(`Browser specified in your config is not installed. Either install it (likely) or change the config.`);
+        throw error;
+      });
+    }
+    return this._browserPromise;
+  }
+
+  async createIsolatedContext(): Promise<BrowserContextAndBrowser> {
+    const browser = await this.browser();
+    testDebug('Creating isolated context');
+    const browserContext = await browser.newContext(this._browserConfig.contextOptions);
     return { browser, browserContext };
-  } catch (error: any) {
-    if (error.message.includes('Executable doesn\'t exist'))
-      throw new Error(`Browser specified in your config is not installed. Either install it (likely) or change the config.`);
-    throw error;
   }
 }
 

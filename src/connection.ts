@@ -18,17 +18,25 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { CallToolRequestSchema, ListToolsRequestSchema, Tool as McpTool } from '@modelcontextprotocol/sdk/types.js';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 
-import { Context, packageJSON } from './context.js';
+import { Context, packageJSON, SharedBrowser } from './context.js';
 import { snapshotTools, visionTools } from './tools.js';
 
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { FullConfig } from './config.js';
 
-export async function createConnection(config: FullConfig): Promise<Connection> {
+let sharedBrowser: SharedBrowser | undefined;
+
+export async function createConnection(config: FullConfig): Promise<{ connection?: Connection, error?: string }> {
+  if (sharedBrowser && !config.browser?.isolated)
+    return { error: 'Multiple connections are only supported in --isolated mode.' };
+
+  if (!sharedBrowser)
+    sharedBrowser = new SharedBrowser(config.browser);
+
   const allTools = config.vision ? visionTools : snapshotTools;
   const tools = allTools.filter(tool => !config.capabilities || tool.capability === 'core' || config.capabilities.includes(tool.capability));
 
-  const context = new Context(tools, config);
+  const context = new Context(tools, config, sharedBrowser);
   const server = new Server({ name: 'Playwright', version: packageJSON.version }, {
     capabilities: {
       tools: {},
@@ -75,7 +83,7 @@ export async function createConnection(config: FullConfig): Promise<Connection> 
   });
 
   const connection = new Connection(server, context);
-  return connection;
+  return { connection };
 }
 
 export class Connection {
