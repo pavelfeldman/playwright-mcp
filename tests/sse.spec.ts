@@ -55,6 +55,7 @@ test('sse transport', async ({ serverEndpoint }) => {
   const client = new Client({ name: 'test', version: '1.0.0' });
   await client.connect(transport);
   await client.ping();
+  await client.close();
 });
 
 test('streamable http transport', async ({ serverEndpoint }) => {
