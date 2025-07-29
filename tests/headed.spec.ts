@@ -40,11 +40,18 @@ for (const mcpHeadless of [false, true]) {
         },
       });
 
-      expect(response).toContainTextContent(`Mozilla/5.0`);
-      if (mcpHeadless)
-        expect(response).toContainTextContent(`HeadlessChrome`);
-      else
-        expect(response).not.toContainTextContent(`HeadlessChrome`);
+      expect(response).toHaveResponse({
+        pageState: expect.stringContaining(`- Page Title: Mozilla/5.0`),
+      });
+      if (mcpHeadless) {
+        expect(response).toHaveResponse({
+          pageState: expect.stringContaining(`HeadlessChrome`),
+        });
+      } else {
+        expect(response).not.toHaveResponse({
+          pageState: expect.stringContaining(`HeadlessChrome`),
+        });
+      }
     });
   });
 }
