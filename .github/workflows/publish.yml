@@ -76,11 +76,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Validate server.json version matches package.json
+      - name: Validate server.json, plugin.json and mcp.json versions match package.json
         run: |
           node -e "
             const pkg = require('./package.json');
             const server = require('./server.json');
+            const plugin = require('./plugin.json');
+            const mcp = require('./mcp.json');
             const mismatches = [];
             if (server.version !== pkg.version)
               mismatches.push(\`server.version=\${server.version} != package.version=\${pkg.version}\`);
@@ -88,8 +90,13 @@ jobs:
               if (p.version !== pkg.version)
                 mismatches.push(\`packages[\${p.identifier}].version=\${p.version} != package.version=\${pkg.version}\`);
             }
+            if (plugin.version !== pkg.version)
+              mismatches.push(\`plugin.version=\${plugin.version} != package.version=\${pkg.version}\`);
+            const args = mcp.mcpServers.playwright.args;
+            if (!args.includes(\`@playwright/mcp@\${pkg.version}\`))
+              mismatches.push(\`mcp.json args=\${JSON.stringify(args)} do not pin @playwright/mcp@\${pkg.version}\`);
             if (mismatches.length) {
-              console.error('server.json is out of sync with package.json:');
+              console.error('server.json, plugin.json or mcp.json is out of sync with package.json:');
               for (const m of mismatches) console.error('  ' + m);
               process.exit(1);
             }

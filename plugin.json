@@ -1,0 +1,19 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "playwright-mcp",
+  "version": "0.0.80",
+  "description": "Browser automation for agents through the Playwright MCP server: navigate, interact with pages via accessibility snapshots, take screenshots and inspect network and console output.",
+  "author": {
+    "name": "Microsoft Corporation"
+  },
+  "homepage": "https://github.com/microsoft/playwright-mcp",
+  "repository": "https://github.com/microsoft/playwright-mcp",
+  "license": "Apache-2.0",
+  "keywords": [
+    "playwright",
+    "browser",
+    "automation",
+    "mcp",
+    "testing"
+  ]
+}

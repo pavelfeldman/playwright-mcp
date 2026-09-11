@@ -16,7 +16,8 @@ Follow the "Rolling Playwright" steps in `CLAUDE.md`: run `node roll.js`, branch
 ```bash
 git checkout main && git pull
 git checkout -b mark-v0.0.<next>
-# Bump "version" in package.json, package-lock.json (both occurrences), and server.json (both occurrences)
+# Bump "version" in package.json, package-lock.json (both occurrences), server.json (both occurrences),
+# plugin.json, and the @playwright/mcp version pinned in mcp.json
 ```
 
 Do NOT open the PR yet — its body must be the release notes, so write those first (steps 3–5).
